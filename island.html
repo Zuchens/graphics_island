@@ -1,0 +1,914 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="utf-8">
+    <title>Lab03-05 - pointerlock controls</title>
+    <style>
+        html,
+        body {
+            width: 100%;
+            height: 100%;
+        }
+
+        body {
+            background-color: #ffffff;
+            margin: 0;
+            overflow: hidden;
+            font-family: arial;
+        }
+
+        #blocker {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+        }
+
+        #instructions {
+            width: 100%;
+            height: 100%;
+            display: -webkit-box;
+            display: -moz-box;
+            display: box;
+            -webkit-box-orient: horizontal;
+            -moz-box-orient: horizontal;
+            box-orient: horizontal;
+            -webkit-box-pack: center;
+            -moz-box-pack: center;
+            box-pack: center;
+            -webkit-box-align: center;
+            -moz-box-align: center;
+            box-align: center;
+            color: #ffffff;
+            text-align: center;
+            cursor: pointer;
+        }
+        #lava_hit {
+            width: 100%;
+            height: 100%;
+            display: -webkit-box;
+            display: -moz-box;
+            display: box;
+            -webkit-box-orient: horizontal;
+            -moz-box-orient: horizontal;
+            box-orient: horizontal;
+            -webkit-box-pack: center;
+            -moz-box-pack: center;
+            box-pack: center;
+            -webkit-box-align: center;
+            -moz-box-align: center;
+            box-align: center;
+            color: #ffffff;
+            text-align: center;
+            cursor: pointer;
+        }
+        #game_over {
+            width: 100%;
+            height: 100%;
+            display: -webkit-box;
+            display: -moz-box;
+            display: box;
+            -webkit-box-orient: horizontal;
+            -moz-box-orient: horizontal;
+            box-orient: horizontal;
+            -webkit-box-pack: center;
+            -moz-box-pack: center;
+            box-pack: center;
+            -webkit-box-align: center;
+            -moz-box-align: center;
+            box-align: center;
+            color: #ffffff;
+            text-align: center;
+            cursor: pointer;
+        }
+    </style>
+</head>
+
+<body>
+<!--<source src="bensound-acousticbreeze.mp3" type="audio/ogg"></source>-->
+<embed loop="true" src="johann_strauss.mp3" autostart="true" hidden="true"></embed>
+<script src="libs/three.min.js"></script>
+<script src="libs/PointerLockControls.js"></script>
+<script src="libs/OrbitControls.js"></script>
+<script src="Mirror.js"></script>
+<script src="libs/WaterShader.js"></script>
+<script src="ImprovedNoise.js"></script>
+<script src="libs/Detector.js"></script>
+<script src="stats.min.js"></script>
+<script src="libs/TerrainLoader.js"></script>
+<script src="libs/TrackballControls.js"></script>
+<script src="libs/ObjectLoader.js"></script>
+<script src="libs/physi.js"></script>
+<script src="libs/perlin.js"></script>
+<script src="libs/OBJLoader.js"></script>
+<script src="jquery-1.9.0.js"></script>
+<script type="text/javascript" src="http://cdnjs.cloudflare.com/ajax/libs/underscore.js/1.4.4/underscore-min.js"></script>
+<script src="libs/THREEx.KeyboardState.js"></script>
+<div id="blocker">
+
+    <div id="instructions">
+        <span style="font-size:40px">Click to play</span>
+        <br /> (W, A, S, D = Move, SPACE = Jump, MOUSE = Look around)
+    </div>
+
+    <div id="lava_hit" hidden="true">
+        <span style="font-size:40px">Watch out!</span>
+        <br /> YOU HAVE BEEN HIT
+    </div>
+
+
+</div>
+
+<script>
+    //'use strict';
+
+    Physijs.scripts.worker = 'physijs_worker.js';
+    Physijs.scripts.ammo = 'ammo.js';
+    var keyboard = new THREEx.KeyboardState();
+    var container, stats;
+    var camera, scene, renderer;
+    var geometry, material, mesh;
+    var controls, time = Date.now();
+
+    var parameters = {
+        width: 2000,
+        height: 2000,
+        widthSegments: 250,
+        heightSegments: 250,
+        depth: 1500,
+        param: 4,
+        filterparam: 1
+    };
+
+    var objects = [];
+
+    var ray;
+
+    var blocker = document.getElementById('blocker');
+    var instructions = document.getElementById('instructions');
+    //var lava_hit = document.getElementById('lava_hit');
+    var game_over = document.getElementById('game_over');
+    var waterNormals;
+
+    var havePointerLock = 'pointerLockElement' in document || 'mozPointerLockElement' in document || 'webkitPointerLockElement' in document;
+
+    if (havePointerLock) {
+
+        var element = document.body;
+
+        var pointerlockchange = function(event) {
+
+            if (document.pointerLockElement === element || document.mozPointerLockElement === element || document.webkitPointerLockElement === element) {
+
+                controls.enabled = true;
+
+                blocker.style.display = 'none';
+
+            } else {
+
+                controls.enabled = false;
+
+                blocker.style.display = '-webkit-box';
+                blocker.style.display = '-moz-box';
+                blocker.style.display = 'box';
+
+                instructions.style.display = '';
+
+            }
+
+        }
+
+        var pointerlockerror = function(event) {
+
+            instructions.style.display = '';
+
+        }
+
+        // Hook pointer lock state change events
+        document.addEventListener('pointerlockchange', pointerlockchange, false);
+        document.addEventListener('mozpointerlockchange', pointerlockchange, false);
+        document.addEventListener('webkitpointerlockchange', pointerlockchange, false);
+
+        document.addEventListener('pointerlockerror', pointerlockerror, false);
+        document.addEventListener('mozpointerlockerror', pointerlockerror, false);
+        document.addEventListener('webkitpointerlockerror', pointerlockerror, false);
+
+        instructions.addEventListener('click', function(event) {
+
+            instructions.style.display = 'none';
+
+            // Ask the browser to lock the pointer
+            element.requestPointerLock = element.requestPointerLock || element.mozRequestPointerLock || element.webkitRequestPointerLock;
+
+            if (/Firefox/i.test(navigator.userAgent)) {
+
+                var fullscreenchange = function(event) {
+
+                    if (document.fullscreenElement === element || document.mozFullscreenElement === element || document.mozFullScreenElement === element) {
+
+                        document.removeEventListener('fullscreenchange', fullscreenchange);
+                        document.removeEventListener('mozfullscreenchange', fullscreenchange);
+
+                        element.requestPointerLock();
+                    }
+
+                }
+
+                document.addEventListener('fullscreenchange', fullscreenchange, false);
+                document.addEventListener('mozfullscreenchange', fullscreenchange, false);
+
+                element.requestFullscreen = element.requestFullscreen || element.mozRequestFullscreen || element.mozRequestFullScreen || element.webkitRequestFullscreen;
+
+                element.requestFullscreen();
+
+            } else {
+
+                element.requestPointerLock();
+
+            }
+
+        }, false);
+
+    } else {
+
+        instructions.innerHTML = 'Your browser doesn\'t seem to support Pointer Lock API';
+
+    }
+
+
+    init();
+    animate();
+    var light;
+    var sphereLightMesh;
+    var step = 0;
+    var speed = 0.001;
+    var directionalLight;
+    var rats;
+    var boat;
+    var birds;
+    var particesGeometry;
+
+
+    function init() {
+        container = document.createElement('div');
+        document.body.appendChild(container);
+
+        renderer = new THREE.WebGLRenderer();
+        //renderer.setPixelRatio( window.devicePixelRatio );
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMapEnabled = true;
+        container.appendChild(renderer.domElement);
+
+        camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 1, 2000);
+
+        controls = new THREE.OrbitControls(camera);
+        controls.addEventListener('change', render);
+        scene = new THREE.Scene();
+
+        var sphereLight = new THREE.SphereGeometry(0.2);
+        var sphereLightMaterial = new THREE.MeshBasicMaterial({
+            color: 0xac6c25
+        });
+        sphereLightMesh = new THREE.Mesh(sphereLight, sphereLightMaterial);
+        sphereLightMesh.castShadow = true;
+
+        sphereLightMesh.position = new THREE.Vector3(3, 20, 3);
+        scene.add(sphereLightMesh);
+        sphereLightMesh.position.y = 25;
+        sphereLightMesh.position.x = 20;
+        sphereLightMesh.position.z = 80;
+        controls = new THREE.PointerLockControls(camera);
+        scene.add(controls.getObject());
+        controls.getObject().position.x = 400;
+        controls.getObject().position.z = 400;
+        ray = new THREE.Raycaster();
+        ray.ray.direction.set(0, -1, 0);
+        var water = createWater();
+        water.receiveShadow = true;
+        scene.add(water);
+
+        var skybox = createSkyBox();
+        scene.add(skybox);
+
+        var mesh = createFloor();
+        mesh.receiveShadow = true;
+        mesh.rotation.x = -0.5 * Math.PI;
+        mesh.position.x = 15
+        mesh.position.y = 0
+        mesh.position.z = 0
+        scene.add(mesh);
+
+
+        loadPalmTrees();
+        loadVolcano();
+        loadRat();
+        loadBirds();
+        loadBushes();
+        self.ratspeed = 0.01;
+        self.ratstep = 0;
+        self.ratIndex = 0;
+        self.birdspeed = 0.1;
+        self.birdstep = 0;
+        self.ratIndex = 0;
+        newVolcano();
+        loadBoat();
+        var pointColor = "#ff5808";
+        directionalLight = new THREE.DirectionalLight(pointColor);
+        directionalLight.position.set(100, 100, 100);
+        directionalLight.castShadow = true;
+        directionalLight.shadowCameraNear = 0;
+        directionalLight.shadowCameraFar = 500;
+        directionalLight.shadowCameraLeft = -500;
+        directionalLight.shadowCameraRight = 500;
+        directionalLight.shadowCameraTop = 100;
+        directionalLight.shadowCameraBottom = -100;
+
+        directionalLight.distance = 0;
+        directionalLight.intensity = 2.6;
+        directionalLight.shadowMapHeight = 1024;
+        directionalLight.shadowMapWidth = 1024;
+
+        scene.add(directionalLight);
+        directionalLight.target = mesh;
+
+        loadGrass();
+        loadChrTree();
+        loadDesert();
+
+        document.body.appendChild(renderer.domElement);
+
+        window.addEventListener('resize', onWindowResize, false);
+
+
+
+    }
+
+    function onWindowResize() {
+
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+
+        renderer.setSize(window.innerWidth, window.innerHeight);
+
+    }
+    var leaveBoat=false;
+    function animate() {
+        var self = this;
+
+
+        requestAnimationFrame(animate);
+        render();
+        controls.isOnObject(false);
+
+        ray.ray.origin.copy(controls.getObject().position);
+        ray.ray.origin.y -= 10;
+        var intersections = ray.intersectObjects(objects);
+        if (intersections.length > 0) {
+            var distance = intersections[0].distance;
+            if (distance > 0 && distance < 10) {
+                controls.isOnObject(true);
+            }
+        }
+        if ( keyboard.pressed("z") )
+        {
+           leaveBoat=true;
+        }
+        if (leaveBoat==false) {
+            for (i = 0; i < boat.length; i++) {
+                boat[i].position.x = ray.ray.origin.x
+                boat[i].position.z = ray.ray.origin.z
+            }
+        }
+        controls.update(Date.now() - time);
+
+
+        renderer.render(scene, camera);
+
+        time = Date.now();
+
+
+    }
+
+    var movement =[];
+    var count_hit =0;
+    for(j =0; j<self.RATNUM;j++){
+        movement.push(Math.random()*2*Math.PI)
+    }
+    function render() {
+        var time = performance.now() * 0.01;
+        water.material.uniforms.time.value += 1.0 / 60.0;
+        water.render();
+
+        step += speed;
+        ratstep += ratspeed;
+        birdstep += birdspeed;
+        //light.position.x = -80;
+        //light.position.z = -8;
+        //light.position.y = Math.sin(step / 36)*1000;
+        sphereLightMesh.position.z = -8;
+        sphereLightMesh.position.y = +(270 * (Math.sin(step / 3)));
+        sphereLightMesh.position.x = 10 + (26 * (Math.cos(step / 3)));
+        //boat[0].position.z = boat[0].position.z + 10;
+
+        directionalLight.position.z = -8;
+        directionalLight.position.y = +(27 * (Math.sin(step / 3)));
+        directionalLight.position.x = 10 + (26 * (Math.cos(step / 3)));
+        self.ratIndex += 1;
+        ratsMove = rats.slice();
+
+        var idx =0;
+        for (i = 0; i < rats.length - 1; i++) {
+            ratsMove[i].position.z = rats[i].position.z + (Math.sin(ratstep / 10)) / 10//*Math.sin(movement[idx]);
+            ratsMove[i].rotation.y = rats[i].rotation.y + (Math.sin(ratstep/10 )) / 50//*Math.sin(movement[idx]);
+            //ratsMove[i].rotation.x = rats[i].position.z + (Math.sin(ratstep / 3)) / 10;
+            ratsMove[i].position.x = rats[i].position.x + (Math.cos(ratstep / 10)) / 10//*Math.sin(movement[idx]);
+            if (idx ==999){
+                idx =0;
+            }
+        }
+        birdsMove = birds.slice();
+        for (i = 0; i < birds.length - 1; i++) {
+            birdsMove[i].position.z = birds[i].position.z - (Math.sin(birdstep / 3)) ;
+            birdsMove[i].position.x = birds[i].position.x - (Math.cos(birdstep / 3)) ;
+            birdsMove[i].rotation.y = birds[i].rotation.y - (Math.sin(birdstep/3 )) / 50;
+        }
+
+        var i=0;
+
+        _.forEach(particesGeometry.vertices,  function(particle){
+            var dX, dY, dZ;
+
+            dX =Math.sin(self.birdstep/3 )*self.particesX[i]// *self.ratIndex;
+            dZ = Math.sin(self.birdstep/3)*self.particesZ[i]//*self.ratIndex;
+            dY = Math.cos(self.birdstep / 3)*self.particesY[i]*3;
+            if((controls.getObject().position.x < dX+10)&&(controls.getObject().position.x > dX-10)&&
+                    (controls.getObject().position.y < dY+10)&&(controls.getObject().position.y > dY-10)&&
+                    (controls.getObject().position.z < dZ+10)&&(controls.getObject().position.z > dZ-10)){
+                    blocker.style.display = '-webkit-box';
+                    blocker.style.display = '-moz-box';
+                    blocker.style.display = 'box';
+
+                    game_over.style.display = '';
+               }
+
+           // dZ =  Math.sin(birdstep / 3)*Math.random()*ratIndex;
+            i++;
+            particle.add(new THREE.Vector3(dX, dY, dZ));
+        });
+        particesGeometry.verticesNeedUpdate = true;
+
+        //requestAnimationFrame(render);
+
+
+        //light.position.x = 10 + (26 * (Math.cos(step / 3)));
+        //sphereLightMesh.position = light.position;
+        //requestAnimationFrame(render);
+        //renderer.render(scene, camera);
+    }
+
+    function createFloor() {
+        var planeGeometry = new THREE.PlaneGeometry(425, 425, 1, 1);
+
+        var texture = THREE.ImageUtils.loadTexture('textures/sand_texture1023.jpg');
+        texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+        texture.repeat.set(16, 16);
+        var planeMaterial = new THREE.MeshLambertMaterial({
+            color: 0xffffff,
+            map: texture
+        });
+        var plane = new THREE.Mesh(planeGeometry, planeMaterial);
+        plane.receiveShadow = true;
+        plane.rotation.x = -0.5 * Math.PI;
+        plane.position.x = 15
+        plane.position.y = -10
+        plane.position.z = 0
+        return plane
+    }
+
+
+    function createWater() {
+//        /scene.add(new THREE.AmbientLight(0x000000));
+        var light = new THREE.DirectionalLight(0xffffbb, 0.001);
+        light.position.set(-100, 1, -1);
+        scene.add(light);
+        waterNormals = new THREE.TextureLoader().load('textures/waternormals.jpg');
+        //waterNormals.wrapS = THREE.RepeatWrapping;
+        //waterNormals.wrapT =THREE.RepeatWrapping;
+        water = new THREE.Water(renderer, camera, scene, {
+            textureWidth: 512,
+            textureHeight: 512,
+            waterNormals: waterNormals,
+            alpha: 1.0,
+            sunDirection: light.position.clone().normalize(),
+            sunColor: 0xffffff,
+            waterColor: 0x001e0f,
+            distortionScale: 50.0,
+        });
+
+
+        mirrorMesh = new THREE.Mesh(
+                new THREE.PlaneBufferGeometry(parameters.width * 500, parameters.height * 500),
+                water.material
+        );
+
+        mirrorMesh.add(water);
+        mirrorMesh.rotation.x = -Math.PI * 0.5;
+        mirrorMesh.position.y = mirrorMesh.position.y - 10;
+        return mirrorMesh;
+    }
+
+    function newVolcano() {
+        var material = new THREE.PointCloudMaterial({
+            color: 0x000000
+        });
+        particesGeometry = new THREE.Geometry();
+        self.particesX=new Array();
+        self.particesZ=new Array();
+        self.particesY=new Array();
+        var particeSideX=new Array();
+        var particeSideZ=new Array();
+        var particeSideY=new Array();
+        var x, y, z;
+        _.times(1000, function(n){
+            x = Math.random()*3;
+            y = Math.random()*3;
+            z = Math.random()*3;
+
+
+            particesGeometry.vertices.push(new THREE.Vector3(x, y, z));
+            particeSideX.push((Math.random()-0.5)*2);
+            particeSideZ.push((Math.random()-0.5)*2);
+            particeSideY.push(Math.random());
+        });
+        self.particesX = particeSideX.slice();
+        self.particesZ =particeSideZ.slice();
+        self.particesY =particeSideY.slice();
+        var pointCloud = new THREE.PointCloud(particesGeometry, material);
+        scene.add(pointCloud);
+
+    }
+
+    function loadGrass() {
+        var loady = new THREE.JSONLoader();
+        var self = this;
+        self.GRASSNUM = 50;
+        self.randomGrassPlacementX = new Array(self.GRASSNUM);
+        self.randomGrassPlacementZ = new Array(self.GRASSNUM);
+        self.grass = [];
+        for (j = 0; j < self.GRASSNUM; j++) {
+            self.randomGrassPlacementX[j] = Math.random() * 200 - 35*Math.random()+130;
+            self.randomGrassPlacementZ[j] = Math.random() * 200 - 35*Math.random()+130;
+        }
+
+        loady.load('models/grass5.json', function(geometry, materials) {
+            for (j = 0; j < self.GRASSNUM; j++) {
+                var material = materials[0];
+                mesh = new THREE.Mesh(geometry, material);
+                group = new THREE.Object3D();
+                mesh.castShadow = true;
+                group.add(mesh);
+                group.position.x = group.position.x + self.randomGrassPlacementZ[j];
+                group.position.y = group.position.y;
+                group.position.z = group.position.z + self.randomGrassPlacementX[j];
+                group.castShadow = true;
+                self.grass.push(group);
+                group.scale.set(9,2,5)
+                scene.add(group); // load the object into your scene here
+            }
+        });
+
+
+    }
+    function loadBoat() {
+        var self = this;
+        var loady = new THREE.JSONLoader();
+        this.boat = [];
+        loady.load('models/boat.json', function(geometry, materials) {
+            var material = materials[0];
+            mesh = new THREE.Mesh(geometry, material);
+            group = new THREE.Object3D();
+            mesh.castShadow = true;
+            group.add(mesh);
+            group.position.x = group.position.x +50;
+            group.position.y = group.position.y+5;
+            group.position.z = group.position.z +50;
+            group.castShadow = true;
+            group.scale.set(5,5,5)
+            this.boat.push(group);
+            scene.add(group); // load the object into your scene here
+        });
+        b = this.boat
+        // self.boat[0].scale.set(100,100,100)
+        boat = self.boat.slice();
+
+    }
+    function loadChrTree() {
+        var loady = new THREE.JSONLoader();
+        var self = this;
+        self.CHRTREE = 100;
+        self.randomChrTreePlacementX = new Array(self.CHRTREE);
+        self.randomChrTreePlacementZ = new Array(self.CHRTREE);
+        for (j = 0; j < self.CHRTREE; j++) {
+            self.randomChrTreePlacementX[j] =  Math.random() * 200 - 20*Math.random()+130;
+            self.randomChrTreePlacementZ[j] = Math.random() * 200 - 20*Math.random()+130;
+        }
+        for (i = 1; i < 5; i++) {
+            loady.load('models/tree' + i + '.json', function(geometry, materials) {
+                for (j = 0; j < self.CHRTREE; j++) {
+                    var material = materials[0];
+                    mesh = new THREE.Mesh(geometry, material);
+                    group = new THREE.Object3D();
+                    mesh.castShadow = true;
+                    group.add(mesh);
+                    group.position.x = group.position.x + self.randomChrTreePlacementX[j];
+                    group.position.y = group.position.y;
+                    group.position.z = group.position.z + self.randomChrTreePlacementZ[j];
+                    group.castShadow = true;
+                    group.scale.set(3,3,3)
+                    scene.add(group); // load the object into your scene here
+                }
+            });
+
+        }
+    }
+    function loadDesert() {
+        var loady = new THREE.JSONLoader();
+        var self = this;
+        self.DESERT = 90;
+        self.randomDesertPlacementX = new Array(self.DESERT);
+        self.randomDesertPlacementZ = new Array(self.DESERT);
+        self.grass = [];
+        for (j = 0; j < self.DESERT; j++) {
+            self.randomDesertPlacementX[j] = Math.random() * 400 - 15*Math.random()-200;
+            self.randomDesertPlacementZ[j] = Math.random() * 400 - 15*Math.random()-200;
+        }
+
+        loady.load('desert/deser.json', function(geometry) {
+            for (j = 0; j < self.DESERT; j++) {
+                var texture = THREE.ImageUtils.loadTexture('textures/desert.jpg');
+                texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+                texture.repeat.set(64, 64);
+                var planeMaterial = new THREE.MeshLambertMaterial({
+                    color: 0xffffff,
+                    map: texture
+                });
+                mesh = new THREE.Mesh(geometry, planeMaterial);
+                group = new THREE.Object3D();
+                mesh.castShadow = true;
+                mesh.receiveShadow = true;
+                group.add(mesh);
+                group.position.x = group.position.x + self.randomDesertPlacementX[j];
+                group.position.y = group.position.y;
+                group.position.z = group.position.z + self.randomDesertPlacementZ[j];
+                group.castShadow = true;
+                self.grass.push(group);
+                group.scale.set(9,2,5)
+                scene.add(group); // load the object into your scene here
+            }
+        });
+    }
+
+    function loadVolcano() {
+        var loady = new THREE.JSONLoader();
+        var lavaGeometry = new THREE.CylinderGeometry({
+            radiusTop: 30,
+            radiusBottom: 30,
+            height: 30,
+            radialSegments: 60,
+            heightSegments: 2,
+            openEnded: false
+        })
+
+        var lavaGeometry = new THREE.CylinderGeometry(11.4, 30.9, 42, 14, 4, false);
+        var texture = THREE.ImageUtils.loadTexture('textures/lava.png');
+        var textureNormals = THREE.ImageUtils.loadTexture('textures/NormalMap.png');
+        var lavaMaterial = new THREE.MeshLambertMaterial({
+            color: 0xffffff,
+            map: texture
+        });
+        var lava = new THREE.Mesh(lavaGeometry, lavaMaterial, textureNormals);
+        lava.position.set(100, 30, 100);
+        scene.add(lava);
+        lava.position.x = -4;
+        lava.position.y = 3;
+        lava.position.z = 0;
+        lava.scale.set(2,2,2)
+        var volcanoGeometry = new THREE.CylinderGeometry(13.4, 33.9, 44, 14, 4, true);
+        var texture = THREE.ImageUtils.loadTexture('textures/volcano.jpg');
+        texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+        texture.repeat.set(4, 4);
+        var textureNormals = THREE.ImageUtils.loadTexture('textures/volcanoNormals.png');
+        texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+        texture.repeat.set(4, 4);
+        var volcanoMaterial = new THREE.MeshLambertMaterial({
+            color: 0xffffff,
+            map: texture
+        });
+        var volcano = new THREE.Mesh(volcanoGeometry, volcanoMaterial, textureNormals);
+        volcano.position.set(100, 30, 100);
+        volcano.position.x = -4;
+        volcano.position.y = 3;
+        volcano.position.z = 0;
+        volcano.castShadow = true;
+        volcano.scale.set(2,2,2)
+        scene.add(volcano);
+    }
+
+    function loadPalmTrees() {
+        var loady = new THREE.JSONLoader();
+        var self = this;
+        self.TREENUM = 100;
+        self.randomTreePlacementX = new Array(self.TREENUM);
+        self.randomTreePlacementZ = new Array(self.TREENUM);
+        loady.load('models/tree2.js', function(geometry, materials) {
+            for (j = 0; j < self.TREENUM; j++) {
+                self.randomTreePlacementX[j] = Math.random() * 130 - 50*Math.random()-170;
+                self.randomTreePlacementZ[j] =  Math.random() * 130 - 50*Math.random()-170;
+                var material = materials[0];
+                mesh = new THREE.Mesh(geometry, material);
+                group = new THREE.Object3D();
+                group.add(mesh);
+                group.position.x = group.position.x + self.randomTreePlacementX[j];
+                group.position.y = group.position.y + 9;
+                group.position.z = group.position.z + self.randomTreePlacementZ[j];
+                group.castShadow = true;
+                scene.add(group); // load the object into your scene here
+            }
+        });
+
+        for (i = 1; i < 12; i++) {
+            loady.load('models/leaf' + i + '.json', function(geometry, materials) {
+                for (j = 0; j < self.TREENUM; j++) {
+                    var material = materials[0];
+                    mesh = new THREE.Mesh(geometry, material);
+                    group = new THREE.Object3D();
+                    mesh.castShadow = true;
+                    group.add(mesh);
+                    group.position.x = group.position.x + self.randomTreePlacementX[j];
+                    group.position.y = group.position.y + 9;
+                    group.position.z = group.position.z + self.randomTreePlacementZ[j];
+                    group.castShadow = true;
+                    scene.add(group); // load the object into your scene here
+                }
+            });
+
+
+        }
+    }
+
+    function loadRat() {
+        var loady = new THREE.JSONLoader();
+        var self = this;
+        self.RATNUM = 100;
+        self.randomRatPlacementX = new Array(self.RATNUM);
+        self.randomRatPlacementZ = new Array(self.RATNUM);
+        self.rats = [];
+        for (j = 0; j < self.RATNUM; j++) {
+            self.randomRatPlacementX[j] = Math.random() * 370 - 250;
+            self.randomRatPlacementZ[j] = Math.random() * 370 - 250;
+        }
+        for (i = 1; i < 6; i++) {
+            loady.load('rat/rat' + i + '.json', function(geometry, materials) {
+                for (j = 0; j < self.RATNUM; j++) {
+                    var material = materials[0];
+                    mesh = new THREE.Mesh(geometry, material);
+                    group = new THREE.Object3D();
+                    mesh.castShadow = true;
+                    group.add(mesh);
+                    group.position.x = group.position.x + self.randomRatPlacementX[j];
+                    group.position.y = group.position.y+3;
+                    group.position.z = group.position.z + self.randomRatPlacementZ[j];
+                    group.castShadow = true;
+                    self.rats.push(group);
+                    scene.add(group); // load the object into your scene here
+                }
+            });
+
+        }
+        rats = self.rats.slice();
+
+
+    }
+
+    function loadBushes() {
+        var loady = new THREE.JSONLoader();
+        var self = this;
+        self.BUSH = 100;
+        self.randomBushPlacementX = new Array(self.BUSH);
+        self.randomBushPlacementZ = new Array(self.BUSH);
+        for (j = 0; j < self.BUSH; j++) {
+            self.randomBushPlacementX[j] = Math.random() * 370 - 185;
+            self.randomBushPlacementZ[j] =  Math.random() * 370 - 185;
+        }
+        for (i = 1; i < 3; i++) {
+            loady.load('models/bush' + i + '.json', function(geometry, materials) {
+                for (j = 0; j < self.BUSH; j++) {
+                    var material = materials[0];
+                    mesh = new THREE.Mesh(geometry, material);
+                    group = new THREE.Object3D();
+                    mesh.castShadow = true;
+                    group.add(mesh);
+                    group.position.x = group.position.x + self.randomBushPlacementX[j];
+                    group.position.y = group.position.y +3;
+                    group.position.z = group.position.z + self.randomBushPlacementZ[j];
+                    group.castShadow = true;
+                    group.receiveShadow = true;
+                    scene.add(group); // load the object into your scene here
+                }
+            });
+
+        }
+
+
+    }
+
+    function loadBirds() {
+        var loady = new THREE.JSONLoader();
+        var self = this;
+        self.BIRDNUM = 50;
+        self.randomBirdPlacementX = new Array(self.BIRDNUM);
+        self.randomBirdPlacementZ = new Array(self.BIRDNUM);
+        self.randomBirdPlacementY = new Array(self.BIRDNUM);
+        self.birds = [];
+        for (j = 0; j < self.BIRDNUM; j++) {
+            self.randomBirdPlacementX[j] = Math.random() * 1000 - 500;
+            self.randomBirdPlacementZ[j] = Math.random() * 1000 - 500;
+            self.randomBirdPlacementY[j] = Math.random() * 40;
+        }
+        for (i = 1; i < 7; i++) {
+            loady.load('bird/bird' + i + '.json', function(geometry, materials) {
+                for (j = 0; j < self.BIRDNUM; j++) {
+                    var material = materials[0];
+                    mesh = new THREE.Mesh(geometry, material);
+                    group = new THREE.Object3D();
+                    mesh.castShadow = true;
+                    group.add(mesh);
+                    group.position.x = group.position.x + self.randomBirdPlacementX[j];
+                    group.position.y = group.position.y + 100  + self.randomBirdPlacementY[j];
+                    group.position.z = group.position.z + self.randomBirdPlacementZ[j];
+                    group.castShadow = true;
+                    self.birds.push(group);
+                    scene.add(group); // load the object into your scene here
+                }
+            });
+
+        }
+        birds = self.birds.slice();
+
+
+    }
+
+    function createSkyBox() {
+        var cubeMap = new THREE.CubeTexture([]);
+        cubeMap.format = THREE.RGBFormat;
+
+        var loader = new THREE.ImageLoader();
+        loader.load('textures/skyboxsun25degtest.png', function(image) {
+
+            var getSide = function(x, y) {
+
+                var size = 1024;
+
+                var canvas = document.createElement('canvas');
+                canvas.width = size;
+                canvas.height = size;
+
+                var context = canvas.getContext('2d');
+                context.drawImage(image, -x * size, -y * size);
+
+                return canvas;
+
+            };
+
+            cubeMap.images[0] = getSide(2, 1); // px
+            cubeMap.images[1] = getSide(0, 1); // nx
+            cubeMap.images[2] = getSide(1, 0); // py
+            cubeMap.images[3] = getSide(1, 2); // ny
+            cubeMap.images[4] = getSide(1, 1); // pz
+            cubeMap.images[5] = getSide(3, 1); // nz
+            cubeMap.needsUpdate = true;
+
+        });
+
+        var cubeShader = THREE.ShaderLib['cube'];
+        cubeShader.uniforms['tCube'].value = cubeMap;
+
+        var skyBoxMaterial = new THREE.ShaderMaterial({
+            fragmentShader: cubeShader.fragmentShader,
+            vertexShader: cubeShader.vertexShader,
+            uniforms: cubeShader.uniforms,
+            depthWrite: true,
+            side: THREE.BackSide
+        });
+
+        var skyBox = new THREE.Mesh(
+                new THREE.BoxGeometry(1200, 1200, 1200),
+                skyBoxMaterial
+        );
+        return skyBox;
+    }
+</script>
+</body>
+
+</html>
